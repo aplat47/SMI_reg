@@ -1,7 +1,19 @@
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
-TOKEN = "8408634586:AAFC1aIugJxY3jdI1rgYUcTPXU1gozSj5pw"
+TOKEN = "8408634586:AAFC1aIugJxY3jdI1rgYUcTPXU1gozSj5pw"   # ← вставь новый токен от BotFather
 
 # Хранилище состояний пользователей
 user_state = {}
@@ -18,7 +30,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Он поможет вам зарегистрироваться на вебинар\n"
         "«Инструменты инвестиций в 2026 году» и получить подарок – Инструкцию для новичков "
         "\"Как открыть счет для торгов и правильно выбрать платформу/банк\" 🎁\n\n"
-        "Чтобы завершить регистрацию, нажмите кнопку ниже 👇"
+        "Чтобы завершить регистрацию, оставьте ваш номер телефона и почту по кнопке ниже 👇🏻"
     )
 
     keyboard = ReplyKeyboardMarkup(
@@ -45,10 +57,10 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(DATA_FILE, "a", encoding="utf-8") as f:
         f.write(f"{name} | {phone}\n")
 
-    # Убираем клавиатуру
+    # Сообщение-подтверждение
     await update.message.reply_text("Спасибо! Регистрируем вас...")
 
-    # Сообщение 2
+    # --- Сообщение 2: картинка + текст + кнопка ---
     text = (
         f"{name}, поздравляю! 🎉\n\n"
         "Вы успешно зарегистрированы на вебинар\n"
@@ -69,7 +81,13 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [[InlineKeyboardButton("🎁 ЗАБРАТЬ ПОДАРОК", url="https://t.me/+a163cq-juqRjMzMy")]]
     )
 
-    await update.message.reply_text(text, reply_markup=keyboard)
+    # Файл картинки должен лежать рядом с bot.py
+    with open("webinar.jpg", "rb") as photo:
+        await update.message.reply_photo(
+            photo=photo,
+            caption=text,
+            reply_markup=keyboard
+        )
 
     user_state[user_id] = "DONE"
 
