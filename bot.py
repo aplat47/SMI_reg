@@ -12,12 +12,19 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+from telegram.error import TelegramError
+from telegram.constants import ParseMode
 import asyncio
+import os
 
-TOKEN = "8385134574:AAFEPPiQD6DnT1eIXUcho98tETB5smNNIBQ"   # ← вставь новый токен от BotFather
+TOKEN = "8350316731:AAFJHJhnXJZCETz9F1opdT8v9BECxNk_FQY"  # замените на свой токен
 USERS_FILE = "users.txt"
 DATA_FILE = "registrations.txt"
-ADMIN_ID = 268936036  # ← Вставь сюда свой Telegram ID
+ADMIN_ID = 268936036  # ваш Telegram ID
+
+# ===== пути =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MEDIA_DIR = os.path.join(BASE_DIR, "media")
 
 # Хранилище состояний пользователей
 user_state = {}
@@ -67,17 +74,15 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(DATA_FILE, "a", encoding="utf-8") as f:
         f.write(f"{name} | {phone}\n")
 
-    # Сохраняем user_id ещё раз (на всякий случай)
+    # Сохраняем user_id ещё раз
     with open(USERS_FILE, "a+", encoding="utf-8") as f:
         f.seek(0)
         users = f.read().splitlines()
         if str(user_id) not in users:
             f.write(f"{user_id}\n")
 
-    # Сообщение-подтверждение
     await update.message.reply_text("Спасибо! Регистрируем вас...")
 
-    # --- Сообщение 2: картинка + текст + кнопка ---
     text = (
         f"{name}, поздравляю! 🎉\n\n"
         "Вы успешно зарегистрированы на вебинар\n"
@@ -98,13 +103,12 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [[InlineKeyboardButton("🎁 ЗАБРАТЬ ПОДАРОК", url="https://t.me/+a163cq-juqRjMzMy")]]
     )
 
-    # Файл картинки должен лежать рядом с bot.py
-    with open("webinar.jpg", "rb") as photo:
-        await update.message.reply_photo(
-            photo=photo,
-            caption=text,
-            reply_markup=keyboard
-        )
+    photo_path = "webinar.jpg"
+    if os.path.exists(photo_path):
+        with open(photo_path, "rb") as photo:
+            await update.message.reply_photo(photo=photo, caption=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
     user_state[user_id] = "DONE"
 
@@ -113,16 +117,81 @@ async def fallback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Пожалуйста, нажмите кнопку для отправки контакта ☝️")
 
 
-# ----------------- РАССЫЛКА -----------------
+# ----------------- ФУНКЦИЯ ОТПРАВКИ ТЕКСТА/КАРТИНКИ -----------------
+async def send_photo_or_text(bot, chat_id, text, image=None, admin_id=None):
+    try:
+        if image:
+            # URL
+            if image.startswith("http"):
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=image,
+                    caption=text,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+
+            # Локальный файл
+            image_path = os.path.join(MEDIA_DIR, image)
+
+            if not os.path.exists(image_path):
+                if admin_id:
+                    await bot.send_message(
+                        chat_id=admin_id,
+                        text=f"⚠ Картинка не найдена:\n{image_path}"
+                    )
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML
+                )
+                return
+
+            with open(image_path, "rb") as photo:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=text,
+                    parse_mode=ParseMode.HTML
+                )
+
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML
+            )
+
+    except TelegramError as e:
+        if admin_id:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=f"❌ Ошибка отправки:\n{e}"
+            )
+
+
+
+# ----------------- РАССЫЛКА ВСЕМ -----------------
 async def send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
     if not context.args:
-        await update.message.reply_text("❗ Использование:\n/sendall текст рассылки")
+        await update.message.reply_text(
+            "❗ Использование:\n/sendall\nимя_картинки.jpg\nтекст с абзацами и HTML"
+        )
         return
 
-    text = " ".join(context.args)
+    raw_text = update.message.text.partition(" ")[2]
+
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    image = None
+
+    if lines and lines[0].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+        image = lines[0]
+        text = "\n".join(lines[1:])
+    else:
+        text = "\n".join(lines)
 
     try:
         with open(USERS_FILE, encoding="utf-8") as f:
@@ -136,17 +205,69 @@ async def send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for user_id in users:
         try:
-            await context.bot.send_message(chat_id=int(user_id), text=text)
+            await send_photo_or_text(
+                context.bot,
+                int(user_id),
+                text,
+                image,
+                admin_id=update.effective_user.id
+            )
             sent += 1
-            await asyncio.sleep(0.05)  # защита от лимитов
-        except:
+            await asyncio.sleep(0.05)
+        except Exception:
             failed += 1
 
     await update.message.reply_text(
-        f"✅ Рассылка завершена\n"
-        f"Отправлено: {sent}\n"
-        f"Ошибок: {failed}"
+        f"✅ Рассылка завершена\nОтправлено: {sent}\nОшибок: {failed}"
     )
+
+# ----------------- ПЕРСОНАЛЬНОЕ СООБЩЕНИЕ -----------------
+async def send_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❗ Использование:\n/send <user_id>\nимя_картинки.jpg\nтекст с абзацами и HTML"
+        )
+        return
+
+    target_user_id = context.args[0]
+
+    raw_text = update.message.text.partition(" ")[2]
+    raw_text = raw_text.partition(" ")[2]
+
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    image = None
+
+    if lines and lines[0].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+        image = lines[0]
+        text = "\n".join(lines[1:])
+    else:
+        text = "\n".join(lines)
+
+    try:
+        chat = await context.bot.get_chat(int(target_user_id))
+        full_name = f"{chat.first_name} {chat.last_name or ''}".strip()
+        personalized_text = f"Привет, {full_name}!\n\n{text}"
+
+        await send_photo_or_text(
+            context.bot,
+            int(target_user_id),
+            personalized_text,
+            image,
+            admin_id=update.effective_user.id
+        )
+
+        await update.message.reply_text(
+            f"✅ Сообщение отправлено пользователю {target_user_id}"
+        )
+
+    except TelegramError as e:
+        await update.message.reply_text(
+            f"❌ Не удалось отправить сообщение:\n{e}"
+        )
+
 
 
 # ----------------- MAIN -----------------
@@ -156,10 +277,16 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_text))
-    app.add_handler(CommandHandler("sendall", send_all))  # команда рассылки
+    app.add_handler(CommandHandler("sendall", send_all))
+    app.add_handler(CommandHandler("send", send_user))
 
     app.run_polling()
 
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
